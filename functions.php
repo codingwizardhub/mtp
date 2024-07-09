@@ -1882,6 +1882,7 @@ function display_ongoing_bookings() {
 	echo '</div>';
 }
 
+
 function display_bookings_table() {
     global $wpdb;
 
@@ -1891,6 +1892,7 @@ function display_bookings_table() {
     $checkout_filter = isset($_GET['checkout_date']) ? $_GET['checkout_date'] : '';
     $name_filter = isset($_GET['customer_name']) ? $_GET['customer_name'] : '';
     $email_filter = isset($_GET['customer_email']) ? $_GET['customer_email'] : '';
+    $rooms_filter = isset($_GET['rooms']) ? $_GET['rooms'] : '';
 
     $meta_query = array('relation' => 'AND');
 
@@ -1981,48 +1983,81 @@ function display_bookings_table() {
     $total_bookings = $bookings_query->found_posts;
     $total_pages = $bookings_query->max_num_pages;
 
+    $filtered_bookings = [];
+
+    if ($rooms_filter) {
+        $rooms_filter_lower = strtolower($rooms_filter);
+        while ($bookings_query->have_posts()) {
+            $bookings_query->the_post();
+            $booking_id = get_the_ID();
+            $booking = MPHB()->getBookingRepository()->findById($booking_id);
+            $reserved_rooms = $booking->getReservedRooms();
+            $match_found = false;
+
+            foreach ($reserved_rooms as $reserved_room) {
+                $room_name = strtolower(MPHB()->getRoomRepository()->findById($reserved_room->getRoomId())->getTitle());
+                if (strpos($room_name, $rooms_filter_lower) !== false) {
+                    $filtered_bookings[] = $booking_id;
+                    $match_found = true;
+                    break;
+                }
+            }
+        }
+        wp_reset_postdata();
+        $bookings_query = new \WP_Query(array(
+            'post_type' => 'mphb_booking',
+            'posts_per_page' => $per_page,
+            'paged' => $paged,
+            'post__in' => $filtered_bookings,
+            'orderby' => 'meta_value',
+            'meta_key' => 'mphb_check_in_date',
+            'order' => 'ASC',
+        ));
+    }
 ?>
 
-	<div class="wrap">
-		<h1><?php _e('Ongoing Bookings', 'motopress-hotel-booking'); ?></h1>
+    <div class="wrap">
+        <h1><?php _e('Ongoing Bookings', 'motopress-hotel-booking'); ?></h1>
 
-		<form method="get" action="">
-			<input type="hidden" name="page" value="ongoing-bookings">
-			<div class="filter-row">
-				<label for="checkin_date"><?php _e('Check-in Date', 'motopress-hotel-booking'); ?></label>
-				<input type="date" name="checkin_date" id="checkin_date" value="<?php echo esc_attr($checkin_filter); ?>">
-				<label for="checkout_date"><?php _e('Check-out Date', 'motopress-hotel-booking'); ?></label>
-				<input type="date" name="checkout_date" id="checkout_date" value="<?php echo esc_attr($checkout_filter); ?>">
-				<label for="customer_name"><?php _e('Customer Name', 'motopress-hotel-booking'); ?></label>
-				<input type="text" name="customer_name" id="customer_name" value="<?php echo esc_attr($name_filter); ?>">
-				<label for="customer_email"><?php _e('Customer Email', 'motopress-hotel-booking'); ?></label>
-				<input type="text" name="customer_email" id="customer_email" value="<?php echo esc_attr($email_filter); ?>">
-				<input type="submit" class="button button-primary" value="<?php _e('Filter', 'motopress-hotel-booking'); ?>">
-			</div>
-		</form>
+        <form method="get" action="">
+            <input type="hidden" name="page" value="ongoing-bookings">
+            <div class="filter-row">
+                <label for="checkin_date"><?php _e('Check-in Date', 'motopress-hotel-booking'); ?></label>
+                <input type="date" name="checkin_date" id="checkin_date" value="<?php echo esc_attr($checkin_filter); ?>">
+                <label for="checkout_date"><?php _e('Check-out Date', 'motopress-hotel-booking'); ?></label>
+                <input type="date" name="checkout_date" id="checkout_date" value="<?php echo esc_attr($checkout_filter); ?>">
+                <label for="customer_name"><?php _e('Customer Name', 'motopress-hotel-booking'); ?></label>
+                <input type="text" name="customer_name" id="customer_name" value="<?php echo esc_attr($name_filter); ?>">
+                <label for="customer_email"><?php _e('Customer Email', 'motopress-hotel-booking'); ?></label>
+                <input type="text" name="customer_email" id="customer_email" value="<?php echo esc_attr($email_filter); ?>">
+                <label for="rooms"><?php _e('Rooms', 'motopress-hotel-booking'); ?></label>
+                <input type="text" name="rooms" id="rooms" value="<?php echo esc_attr($rooms_filter); ?>">
+                <input type="submit" class="button button-primary" value="<?php _e('Filter', 'motopress-hotel-booking'); ?>">
+            </div>
+        </form>
 
-		<table class="wp-list-table widefat fixed striped">
-			<thead>
-				<tr>
-					<th><?php _e('ID', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Full Name', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Email', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Phone', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Check-in', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Check-out', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Status', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Total Guests', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Rooms', 'motopress-hotel-booking'); ?></th>
-					<th><?php _e('Actions', 'motopress-hotel-booking'); ?></th>
-				</tr>
-			</thead>
-			<tbody>
-				<?php if ($bookings_query->have_posts()) : ?>
-					<?php while ($bookings_query->have_posts()) : $bookings_query->the_post();
-						$booking_id = get_the_ID();
-						$booking = MPHB()->getBookingRepository()->findById($booking_id);
-						$customer_name = $booking->getCustomer()->getName();
-						$customer_name = !empty($customer_name) ? esc_html($customer_name) : __('<em>null</em>', 'motopress-hotel-booking');
+        <table class="wp-list-table widefat fixed striped">
+            <thead>
+                <tr>
+                    <th><?php _e('ID', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Full Name', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Email', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Phone', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Check-in', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Check-out', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Status', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Total Guests', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Rooms', 'motopress-hotel-booking'); ?></th>
+                    <th><?php _e('Actions', 'motopress-hotel-booking'); ?></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if ($bookings_query->have_posts()) : ?>
+                    <?php while ($bookings_query->have_posts()) : $bookings_query->the_post();
+                        $booking_id = get_the_ID();
+                        $booking = MPHB()->getBookingRepository()->findById($booking_id);
+                        $customer_name = $booking->getCustomer()->getName();
+                        $customer_name = !empty($customer_name) ? esc_html($customer_name) : __('<em>null</em>', 'motopress-hotel-booking');
                         $total_guests = 0;
 
                         $reserved_rooms = $booking->getReservedRooms();
@@ -2064,34 +2099,34 @@ function display_bookings_table() {
                                 <a href="<?php echo esc_url(admin_url('post.php?post=' . $booking_id . '&action=edit')); ?>" class="button button-primary">
                                     <?php _e('Edit', 'motopress-hotel-booking'); ?>
                                 </a>
-							</td>
-						</tr>
-					<?php endwhile; ?>
-				<?php else : ?>
-					<tr>
-						<td colspan="10"><?php _e('No ongoing or future bookings found.', 'motopress-hotel-booking'); ?></td>
-					</tr>
-				<?php endif; ?>
-			</tbody>
-		</table>
+                            </td>
+                        </tr>
+                    <?php endwhile; ?>
+                <?php else : ?>
+                    <tr>
+                        <td colspan="10"><?php _e('No ongoing or future bookings found.', 'motopress-hotel-booking'); ?></td>
+                    </tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
 
-		<?php
-		$page_links = paginate_links(array(
-			'base' => add_query_arg('paged', '%#%'),
-			'format' => '',
-			'prev_text' => __('&laquo;', 'motopress-hotel-booking'),
-			'next_text' => __('&raquo;', 'motopress-hotel-booking'),
-			'total' => $total_pages,
-			'current' => $paged
-		));
+        <?php
+        $page_links = paginate_links(array(
+            'base' => add_query_arg('paged', '%#%'),
+            'format' => '',
+            'prev_text' => __('&laquo;', 'motopress-hotel-booking'),
+            'next_text' => __('&raquo;', 'motopress-hotel-booking'),
+            'total' => $total_pages,
+            'current' => $paged
+        ));
 
-		if ($page_links) {
-			echo '<div class="tablenav"><div class="tablenav-pages">' . $page_links . '</div></div>';
-		}
-		?>
-	</div>
+        if ($page_links) {
+            echo '<div class="tablenav"><div class="tablenav-pages">' . $page_links . '</div></div>';
+        }
+        ?>
+    </div>
 <?php
-	wp_reset_postdata();
+    wp_reset_postdata();
 }
 
 
