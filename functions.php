@@ -1853,7 +1853,7 @@ function mphb_create_url( $endpoint, $value = '', $permalink = '' ) {
 function mphb_parse_queue_room_id( $queueItem ) {
 	return (int) preg_replace( '/^\d+_(\d+)/', '$1', $queueItem );
 }
-
+/*
 // Hook to add custom menu item
 add_action('admin_menu', 'add_ongoing_bookings_menu');
 
@@ -1868,6 +1868,7 @@ function add_ongoing_bookings_menu() {
 		6 // Position
 	);
 }
+*/
 
 function display_ongoing_bookings() {
 	// Check user capabilities
@@ -2127,6 +2128,246 @@ function display_bookings_table() {
     </div>
 <?php
     wp_reset_postdata();
+}
+
+
+function display_properties_page() {
+    // Check user capabilities
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    // Save 'cleaner' field if form is submitted
+    if (isset($_POST['save_cleaner'])) {
+        foreach ($_POST['cleaner'] as $property_id => $cleaner_id) {
+            update_post_meta($property_id, 'assigned_cleaner', intval($cleaner_id));
+        }
+    }
+
+    global $wpdb;
+
+    $paged = isset($_GET['paged']) ? intval($_GET['paged']) : 1;
+    $per_page = 20;
+    $offset = ($paged - 1) * $per_page;
+
+    // Define date range
+    $today = date('Y-m-d');
+    $one_week_ago = date('Y-m-d', strtotime('-1 week', strtotime($today)));
+
+    // Fetch properties data with pagination
+    $properties_data = $wpdb->get_results($wpdb->prepare("
+        SELECT p.ID, 
+        COALESCE(CONCAT(pm_first_name.meta_value, ' ', pm_last_name.meta_value), 'N/A') as full_name, 
+        pm_checkin.meta_value as check_in_date,
+        pm_checkout.meta_value as check_out_date
+        FROM {$wpdb->prefix}posts p
+        LEFT JOIN {$wpdb->prefix}postmeta pm_checkin ON p.ID = pm_checkin.post_id AND pm_checkin.meta_key = 'mphb_check_in_date'
+        LEFT JOIN {$wpdb->prefix}postmeta pm_checkout ON p.ID = pm_checkout.post_id AND pm_checkout.meta_key = 'mphb_check_out_date'
+        LEFT JOIN {$wpdb->prefix}postmeta pm_first_name ON p.ID = pm_first_name.post_id AND pm_first_name.meta_key = 'mphb_first_name'
+        LEFT JOIN {$wpdb->prefix}postmeta pm_last_name ON p.ID = pm_last_name.post_id AND pm_last_name.meta_key = 'mphb_last_name'
+        WHERE p.post_type = 'mphb_booking'
+        AND (pm_checkin.meta_value >= %s OR pm_checkin.meta_value IS NULL)
+        GROUP BY p.ID
+        ORDER BY pm_checkin.meta_value DESC
+        LIMIT %d OFFSET %d
+    ", $one_week_ago, $per_page, $offset));
+
+    $total_properties = $wpdb->get_var($wpdb->prepare("
+        SELECT COUNT(DISTINCT p.ID)
+        FROM {$wpdb->prefix}posts p
+        LEFT JOIN {$wpdb->prefix}postmeta pm_checkin ON p.ID = pm_checkin.post_id AND pm_checkin.meta_key = 'mphb_check_in_date'
+        WHERE p.post_type = 'mphb_booking'
+        AND (pm_checkin.meta_value >= %s OR pm_checkin.meta_value IS NULL)
+    ", $one_week_ago));
+
+    $total_pages = ceil($total_properties / $per_page);
+
+    // Fetch cleaners for dropdown
+    $cleaners = get_terms(array(
+        'taxonomy' => 'cleaner',
+        'hide_empty' => false,
+    ));
+
+    // Pagination
+    $page_links = paginate_links(array(
+        'base' => add_query_arg('paged', '%#%'),
+        'format' => '',
+        'prev_text' => __('&laquo;', 'textdomain'),
+        'next_text' => __('&raquo;', 'textdomain'),
+        'total' => $total_pages,
+        'current' => $paged
+    ));
+
+    echo '<div class="wrap">';
+    echo '<h1>' . __('Properties', 'textdomain') . '</h1>';
+
+    if ($page_links) {
+        echo '<div class="tablenav top"><div class="tablenav-pages">' . $page_links . '</div></div>';
+    }
+
+    echo '<form method="post">';
+    echo '<table class="wp-list-table widefat fixed striped">';
+    echo '<thead><tr>';
+    echo '<th>' . __('ID', 'textdomain') . '</th>';
+    echo '<th>' . __('Full Name', 'textdomain') . '</th>';
+    echo '<th>' . __('Check-in Date', 'textdomain') . '</th>';
+    echo '<th>' . __('Check-out Date', 'textdomain') . '</th>';
+    echo '<th>' . __('Property', 'textdomain') . '</th>';
+    echo '<th>' . __('Assign Cleaner', 'textdomain') . '</th>';
+    echo '</tr></thead>';
+    echo '<tbody>';
+
+    if ($properties_data) {
+        foreach ($properties_data as $property) {
+            $assigned_cleaner = get_post_meta($property->ID, 'assigned_cleaner', true);
+
+            // Fetch reserved rooms and construct property list
+            $booking = MPHB()->getBookingRepository()->findById($property->ID);
+            $reserved_rooms = $booking->getReservedRooms();
+            $property_list = [];
+            foreach ($reserved_rooms as $reserved_room) {
+                $room_name = MPHB()->getRoomRepository()->findById($reserved_room->getRoomId())->getTitle();
+                $property_list[] = $room_name;
+            }
+            $property_names = implode(', ', $property_list);
+
+            echo '<tr>';
+            echo '<td>' . esc_html($property->ID) . '</td>';
+            echo '<td>' . esc_html($property->full_name) . '</td>';
+            echo '<td>' . esc_html($property->check_in_date) . '</td>';
+            echo '<td>' . esc_html($property->check_out_date) . '</td>';
+            echo '<td>' . esc_html($property_names) . '</td>';
+            echo '<td><select name="cleaner[' . esc_attr($property->ID) . ']">';
+            echo '<option value="">' . __('None', 'textdomain') . '</option>';
+            foreach ($cleaners as $cleaner) {
+                $selected = $cleaner->term_id == $assigned_cleaner ? ' selected="selected"' : '';
+                echo '<option value="' . esc_attr($cleaner->term_id) . '"' . $selected . '>' . esc_html($cleaner->name) . '</option>';
+            }
+            echo '</select></td>';
+            echo '</tr>';
+        }
+    } else {
+        echo '<tr><td colspan="6">' . __('No properties found.', 'textdomain') . '</td></tr>';
+    }
+
+    echo '</tbody>';
+    echo '</table>';
+
+    if ($page_links) {
+        echo '<div class="tablenav bottom"><div class="tablenav-pages">' . $page_links . '</div></div>';
+    }
+
+    echo '<p><input type="submit" name="save_cleaner" class="button button-primary" value="' . __('Save Changes', 'textdomain') . '"></p>';
+    echo '</form>';
+    echo '</div>';
+}
+
+
+function display_previous_bookings() {
+    // Check user capabilities
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    global $wpdb;
+
+    $paged = isset($_GET['paged']) ? intval($_GET['paged']) : 1;
+    $per_page = 20;
+    $offset = ($paged - 1) * $per_page;
+
+    // Define date range
+    $today = date('Y-m-d');
+    $one_week_ago = date('Y-m-d', strtotime('-1 week', strtotime($today)));
+
+    // Fetch previous bookings data with pagination
+    $previous_bookings = $wpdb->get_results($wpdb->prepare("
+        SELECT p.ID, 
+        COALESCE(CONCAT(pm_first_name.meta_value, ' ', pm_last_name.meta_value), 'N/A') as full_name, 
+        pm_checkin.meta_value as check_in_date,
+        pm_checkout.meta_value as check_out_date
+        FROM {$wpdb->prefix}posts p
+        LEFT JOIN {$wpdb->prefix}postmeta pm_checkin ON p.ID = pm_checkin.post_id AND pm_checkin.meta_key = 'mphb_check_in_date'
+        LEFT JOIN {$wpdb->prefix}postmeta pm_checkout ON p.ID = pm_checkout.post_id AND pm_checkout.meta_key = 'mphb_check_out_date'
+        LEFT JOIN {$wpdb->prefix}postmeta pm_first_name ON p.ID = pm_first_name.post_id AND pm_first_name.meta_key = 'mphb_first_name'
+        LEFT JOIN {$wpdb->prefix}postmeta pm_last_name ON p.ID = pm_last_name.post_id AND pm_last_name.meta_key = 'mphb_last_name'
+        WHERE p.post_type = 'mphb_booking'
+        AND (pm_checkin.meta_value < %s)
+        GROUP BY p.ID
+        ORDER BY pm_checkin.meta_value DESC
+        LIMIT %d OFFSET %d
+    ", $one_week_ago, $per_page, $offset));
+
+    $total_previous_bookings = $wpdb->get_var($wpdb->prepare("
+        SELECT COUNT(DISTINCT p.ID)
+        FROM {$wpdb->prefix}posts p
+        LEFT JOIN {$wpdb->prefix}postmeta pm_checkin ON p.ID = pm_checkin.post_id AND pm_checkin.meta_key = 'mphb_check_in_date'
+        WHERE p.post_type = 'mphb_booking'
+        AND (pm_checkin.meta_value < %s)
+    ", $one_week_ago));
+
+    $total_pages = ceil($total_previous_bookings / $per_page);
+
+    // Pagination
+    $page_links = paginate_links(array(
+        'base' => add_query_arg('paged', '%#%'),
+        'format' => '',
+        'prev_text' => __('&laquo;', 'textdomain'),
+        'next_text' => __('&raquo;', 'textdomain'),
+        'total' => $total_pages,
+        'current' => $paged
+    ));
+
+    echo '<div class="wrap">';
+    echo '<h1>' . __('Previous Bookings', 'textdomain') . '</h1>';
+
+    if ($page_links) {
+        echo '<div class="tablenav top"><div class="tablenav-pages">' . $page_links . '</div></div>';
+    }
+
+    echo '<form method="post">';
+    echo '<table class="wp-list-table widefat fixed striped">';
+    echo '<thead><tr>';
+    echo '<th>' . __('ID', 'textdomain') . '</th>';
+    echo '<th>' . __('Full Name', 'textdomain') . '</th>';
+    echo '<th>' . __('Check-in Date', 'textdomain') . '</th>';
+    echo '<th>' . __('Check-out Date', 'textdomain') . '</th>';
+    echo '<th>' . __('Property', 'textdomain') . '</th>';
+    echo '</tr></thead>';
+    echo '<tbody>';
+
+    if ($previous_bookings) {
+        foreach ($previous_bookings as $booking) {
+            // Fetch reserved rooms and construct property list
+            $booking_obj = MPHB()->getBookingRepository()->findById($booking->ID);
+            $reserved_rooms = $booking_obj->getReservedRooms();
+            $property_list = [];
+            foreach ($reserved_rooms as $reserved_room) {
+                $room_name = MPHB()->getRoomRepository()->findById($reserved_room->getRoomId())->getTitle();
+                $property_list[] = $room_name;
+            }
+            $property_names = implode(', ', $property_list);
+
+            echo '<tr>';
+            echo '<td>' . esc_html($booking->ID) . '</td>';
+            echo '<td>' . esc_html($booking->full_name) . '</td>';
+            echo '<td>' . esc_html($booking->check_in_date) . '</td>';
+            echo '<td>' . esc_html($booking->check_out_date) . '</td>';
+            echo '<td>' . esc_html($property_names) . '</td>';
+            echo '</tr>';
+        }
+    } else {
+        echo '<tr><td colspan="5">' . __('No previous bookings found.', 'textdomain') . '</td></tr>';
+    }
+
+    echo '</tbody>';
+    echo '</table>';
+
+    if ($page_links) {
+        echo '<div class="tablenav bottom"><div class="tablenav-pages">' . $page_links . '</div></div>';
+    }
+
+    echo '</form>';
+    echo '</div>';
 }
 
 
