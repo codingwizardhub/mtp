@@ -2097,7 +2097,7 @@ function display_bookings_table() {
                         $booking_id = get_the_ID();
                         $booking = MPHB()->getBookingRepository()->findById($booking_id);
                         $customer_name = $booking->getCustomer()->getName();
-                        $customer_name = !empty($customer_name) ? esc_html($customer_name) : __('<em>AIRBNB BOOKING</em>', 'motopress-hotel-booking');
+                        $customer_name = !empty($customer_name) ? esc_html($customer_name) : __('<em>null</em>', 'motopress-hotel-booking');
                         $adults_total = 0;
                         $children_total = 0;
 
@@ -2236,11 +2236,8 @@ function display_properties_page() {
 
     // Fetch properties data with pagination
     $properties_data = $wpdb->get_results($wpdb->prepare("
-        SELECT p.ID,
-        CASE 
-            WHEN pm_first_name.meta_value IS NOT NULL AND pm_last_name.meta_value IS NOT NULL THEN CONCAT(pm_first_name.meta_value, ' ', pm_last_name.meta_value)
-            ELSE 'AIRBNB BOOKING'
-        END as full_name,
+        SELECT p.ID, 
+        COALESCE(CONCAT(pm_first_name.meta_value, ' ', pm_last_name.meta_value), 'N/A') as full_name, 
         pm_checkin.meta_value as check_in_date,
         pm_checkout.meta_value as check_out_date
         FROM {$wpdb->prefix}posts p
@@ -2344,6 +2341,7 @@ function display_properties_page() {
     echo '</form>';
     echo '</div>';
 }
+
 
 
 function display_previous_bookings() {
