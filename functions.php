@@ -1871,12 +1871,10 @@ function add_ongoing_bookings_menu() {
 */
 
 function display_ongoing_bookings() {
-	// Check user capabilities
 	if (!current_user_can('manage_options')) {
 		return;
 	}
 
-	// Add code to display the list of ongoing and future bookings
 	echo '<div class="wrap">';
 	echo '<h1>' . __('Ongoing Bookings', 'textdomain') . '</h1>';
 	display_bookings_table();
@@ -1886,6 +1884,11 @@ function display_ongoing_bookings() {
 
 function display_bookings_table() {
     global $wpdb;
+    if (isset($_POST['save_cleaner'])) {
+        foreach ($_POST['cleaner'] as $booking_id => $cleaner_id) {
+            update_post_meta($booking_id, 'assigned_cleaner', intval($cleaner_id));
+        }
+    }
 
     $paged = isset($_GET['paged']) ? intval($_GET['paged']) : 1;
     $per_page = 50;
@@ -1970,24 +1973,23 @@ function display_bookings_table() {
         }
     }
 
-	$today = current_time('Y-m-d');
+    $today = current_time('Y-m-d');
 
-	// Add date range for current day and future bookings
-	$meta_query[] = array(
-		'relation' => 'OR',
-		array(
-			'key' => 'mphb_check_in_date',
-			'value' => array($today, '9999-12-31'),
-			'compare' => 'BETWEEN',
-			'type' => 'DATE'
-		),
-		array(
-			'key' => 'mphb_check_out_date',
-			'value' => array($today, '9999-12-31'),
-			'compare' => 'BETWEEN',
-			'type' => 'DATE'
-		)
-	);
+    $meta_query[] = array(
+        'relation' => 'OR',
+        array(
+            'key' => 'mphb_check_in_date',
+            'value' => array($today, '9999-12-31'),
+            'compare' => 'BETWEEN',
+            'type' => 'DATE'
+        ),
+        array(
+            'key' => 'mphb_check_out_date',
+            'value' => array($today, '9999-12-31'),
+            'compare' => 'BETWEEN',
+            'type' => 'DATE'
+        )
+    );
 
     $query_args = array(
         'post_type' => 'mphb_booking',
@@ -2034,7 +2036,12 @@ function display_bookings_table() {
             'order' => 'ASC',
         ));
     }
-?>
+
+    $cleaners = get_terms(array(
+        'taxonomy' => 'cleaner',
+        'hide_empty' => false,
+    ));
+	?>
 
     <div class="wrap">
         <h1><?php _e('Ongoing Bookings', 'motopress-hotel-booking'); ?></h1>
@@ -2056,164 +2063,183 @@ function display_bookings_table() {
             </div>
         </form>
 
-        <div class="tablenav">
-            <div class="tablenav-pages" style="float: right;">
-                <?php
-                $page_links = paginate_links(array(
-                    'base' => add_query_arg('paged', '%#%'),
-                    'format' => '',
-                    'prev_text' => __('&laquo;', 'motopress-hotel-booking'),
-                    'next_text' => __('&raquo;', 'motopress-hotel-booking'),
-                    'total' => $total_pages,
-                    'current' => $paged
-                ));
+		<form method="post">
+		<div class="tablenav">
+			<div class="tablenav-pages" style="float: right;">
+				<?php
+				$page_links = paginate_links(array(
+					'base' => add_query_arg('paged', '%#%'),
+					'format' => '',
+					'prev_text' => __('&laquo;', 'motopress-hotel-booking'),
+					'next_text' => __('&raquo;', 'motopress-hotel-booking'),
+					'total' => $total_pages,
+					'current' => $paged
+				));
 
-                if ($page_links) {
-                    echo $page_links;
-                }
-                ?>
-            </div>
-        </div>
+				if ($page_links) {
+					echo $page_links;
+				}
+				?>
+			</div>
+			<div class="alignleft actions">
+				<input type="submit" name="save_cleaner" class="button button-primary" value="<?php _e('Save Changes', 'motopress-hotel-booking'); ?>">
+			</div>
+		</div>
 
-        <table class="wp-list-table widefat fixed striped">
-            <thead>
-                <tr>
-                    <th><?php _e('ID', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Full Name', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Email', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Phone', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Check-in', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Check-out', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Status', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Total Guests', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Rooms', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Price', 'motopress-hotel-booking'); ?></th>
-                    <th><?php _e('Actions', 'motopress-hotel-booking'); ?></th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if ($bookings_query->have_posts()) : ?>
-                    <?php while ($bookings_query->have_posts()) : $bookings_query->the_post();
-                        $booking_id = get_the_ID();
-                        $booking = MPHB()->getBookingRepository()->findById($booking_id);
-                        $customer_name = $booking->getCustomer()->getName();
-                        $customer_name = !empty($customer_name) ? esc_html($customer_name) : __('<em>null</em>', 'motopress-hotel-booking');
-                        $adults_total = 0;
-                        $children_total = 0;
-
-                        $reserved_rooms = $booking->getReservedRooms();
-                        if (!empty($reserved_rooms) && !$booking->isImported()) {
-                            foreach ($reserved_rooms as $reserved_room) {
-                                $adults_total += $reserved_room->getAdults();
-                                $children_total += $reserved_room->getChildren();
-                            }
-                        }
-
-                        $total_guests = $adults_total + $children_total;
-                        $rooms = $booking->getReservedRooms();
-
-                        // Retrieve payments for the booking
-                        $payments = MPHB()->getPaymentRepository()->findAll(array(
-                            'booking_id' => $booking->getId(),
-                            'post_status' => \MPHB\PostTypes\PaymentCPT\Statuses::STATUS_COMPLETED
-                        ));
-                        $total_price = 0.0;
-                        $total_paid = 0.0;
-
-                        if (!empty($payments)) {
-                            foreach ($payments as $payment) {
-                                $total_paid += $payment->getAmount();
-                            }
-                        }
-
-                        $payment_link = admin_url('edit.php?post_type=mphb_payment&s=' . $booking_id);
-
-                    ?>
-                        <tr>
-                            <td><?php echo $booking_id; ?></td>
-                            <td><?php echo $customer_name; ?></td>
-                            <td><?php echo esc_html($booking->getCustomer()->getEmail()); ?></td>
-                            <td><?php echo esc_html($booking->getCustomer()->getPhone()); ?></td>
-                            <td><?php echo esc_html($booking->getCheckInDate()->format('Y-m-d')); ?></td>
-                            <td><?php echo esc_html($booking->getCheckOutDate()->format('Y-m-d')); ?></td>
-                            <td><?php echo esc_html($booking->getStatus()); ?></td>
-                            <td>
-                                <?php
-                                if ($adults_total == 0 && $children_total == 0) {
-                                    echo __('<em>null</em>', 'motopress-hotel-booking');
-                                } else {
-                                    if ($adults_total > 0) {
-                                        echo 'Adults: ' . $adults_total . '<br>';
-                                    }
-                                    if ($children_total > 0) {
-                                        echo 'Children: ' . $children_total . '<br>';
-                                    }
-                                    echo '<b>Total:</b> ' . '<b>'.$total_guests.'</b>';
-                                }
-                                ?>
-                            </td>
-                            <td>
-                                <?php foreach ($rooms as $reserved_room) : ?>
-                                    <div>
-                                        <?php
-                                        $room_id = $reserved_room->getRoomId();
-                                        $room_name = MPHB()->getRoomRepository()->findById($room_id)->getTitle();
-                                        ?>
-                                        <a href="<?php echo esc_url(admin_url('post.php?post=' . $room_id . '&action=edit')); ?>">
-                                            <?php echo esc_html($room_name); ?>
-                                        </a>
-                                    </div>
-                                <?php endforeach; ?>
-                            </td>
-                            <td>
-                                <?php 
-                                $formatted_price = mphb_format_price($booking->getTotalPrice()); // Corrected to fetch total price of the booking
-                                $formatted_paid = mphb_format_price($total_paid);
-                                echo "Price: $formatted_price<br>";
-                                echo "<a href='$payment_link'>Paid: $formatted_paid</a>"; 
-                                ?>
-                            </td>
-                            <td>
-                                <a href="<?php echo esc_url(admin_url('post.php?post=' . $booking_id . '&action=edit')); ?>" class="button button-primary">
-                                    <?php _e('Edit', 'motopress-hotel-booking'); ?>
-                                </a>
-                            </td>
-                        </tr>
-                    <?php endwhile; ?>
-                <?php else : ?>
+        <form method="post">
+            <table class="wp-list-table widefat fixed striped">
+                <thead>
                     <tr>
-                        <td colspan="11"><?php _e('No ongoing or future bookings found.', 'motopress-hotel-booking'); ?></td>
+                        <th><?php _e('ID', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Full Name', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Email', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Phone', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Check-in', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Check-out', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Status', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Total Guests', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Rooms', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Price', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Cleaners', 'motopress-hotel-booking'); ?></th>
+                        <th><?php _e('Actions', 'motopress-hotel-booking'); ?></th>
                     </tr>
-                <?php endif; ?>
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    <?php if ($bookings_query->have_posts()) : ?>
+                        <?php while ($bookings_query->have_posts()) : $bookings_query->the_post();
+                            $booking_id = get_the_ID();
+                            $booking = MPHB()->getBookingRepository()->findById($booking_id);
+                            $customer_name = $booking->getCustomer()->getName();
+                            $customer_name = !empty($customer_name) ? esc_html($customer_name) : __('<em>AIRBNB BOOKING</em>', 'motopress-hotel-booking');
+                            $adults_total = 0;
+                            $children_total = 0;
 
-        <div class="tablenav">
-            <div class="tablenav-pages">
-                <?php
-                $page_links = paginate_links(array(
-                    'base' => add_query_arg('paged', '%#%'),
-                    'format' => '',
-                    'prev_text' => __('&laquo;', 'motopress-hotel-booking'),
-                    'next_text' => __('&raquo;', 'motopress-hotel-booking'),
-                    'total' => $total_pages,
-                    'current' => $paged
-                ));
+                            $reserved_rooms = $booking->getReservedRooms();
+                            if (!empty($reserved_rooms) && !$booking->isImported()) {
+                                foreach ($reserved_rooms as $reserved_room) {
+                                    $adults_total += $reserved_room->getAdults();
+                                    $children_total += $reserved_room->getChildren();
+                                }
+                            }
 
-                if ($page_links) {
-                    echo '<div class="tablenav"><div class="tablenav-pages">' . $page_links . '</div></div>';
-                }
-                ?>
+                            $total_guests = $adults_total + $children_total;
+                            $rooms = $booking->getReservedRooms();
+
+                            $payments = MPHB()->getPaymentRepository()->findAll(array(
+                                'booking_id' => $booking->getId(),
+                                'post_status' => \MPHB\PostTypes\PaymentCPT\Statuses::STATUS_COMPLETED
+                            ));
+                            $total_price = 0.0;
+                            $total_paid = 0.0;
+
+                            if (!empty($payments)) {
+                                foreach ($payments as $payment) {
+                                    $total_paid += $payment->getAmount();
+                                }
+                            }
+
+                            $payment_link = admin_url('edit.php?post_type=mphb_payment&s=' . $booking_id);
+
+                            // Fetch assigned cleaner
+                            $assigned_cleaner = get_post_meta($booking_id, 'assigned_cleaner', true);
+                        ?>
+                            <tr>
+                                <td><?php echo $booking_id; ?></td>
+                                <td><?php echo $customer_name; ?></td>
+                                <td><?php echo esc_html($booking->getCustomer()->getEmail()); ?></td>
+                                <td><?php echo esc_html($booking->getCustomer()->getPhone()); ?></td>
+                                <td><?php echo esc_html($booking->getCheckInDate()->format('Y-m-d')); ?></td>
+                                <td><?php echo esc_html($booking->getCheckOutDate()->format('Y-m-d')); ?></td>
+                                <td><?php echo esc_html($booking->getStatus()); ?></td>
+                                <td>
+                                    <?php
+                                    if ($adults_total == 0 && $children_total == 0) {
+                                        echo __('<em>null</em>', 'motopress-hotel-booking');
+                                    } else {
+                                        if ($adults_total > 0) {
+                                            echo 'Adults: ' . $adults_total . '<br>';
+                                        }
+                                        if ($children_total > 0) {
+                                            echo 'Children: ' . $children_total . '<br>';
+                                        }
+                                        echo '<b>Total:</b> ' . '<b>'.$total_guests.'</b>';
+                                    }
+                                    ?>
+                                </td>
+                                <td>
+                                    <?php foreach ($rooms as $reserved_room) : ?>
+                                        <div>
+                                            <?php
+                                            $room_id = $reserved_room->getRoomId();
+                                            $room_name = MPHB()->getRoomRepository()->findById($room_id)->getTitle();
+                                            ?>
+                                            <a href="<?php echo esc_url(admin_url('post.php?post=' . $room_id . '&action=edit')); ?>">
+                                                <?php echo esc_html($room_name); ?>
+                                            </a>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </td>
+                                <td>
+                                    <?php 
+                                    $formatted_price = mphb_format_price($booking->getTotalPrice()); // Corrected to fetch total price of the booking
+                                    $formatted_paid = mphb_format_price($total_paid);
+                                    echo "Price: $formatted_price<br>";
+                                    echo "<a href='$payment_link'>Paid: $formatted_paid</a>"; 
+                                    ?>
+                                </td>
+                                <td>
+                                    <select name="cleaner[<?php echo esc_attr($booking_id); ?>]">
+                                        <option value=""><?php _e('None', 'motopress-hotel-booking'); ?></option>
+                                        <?php foreach ($cleaners as $cleaner) : ?>
+                                            <?php $selected = $cleaner->term_id == $assigned_cleaner ? ' selected="selected"' : ''; ?>
+                                            <option value="<?php echo esc_attr($cleaner->term_id); ?>"<?php echo $selected; ?>><?php echo esc_html($cleaner->name); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                                <td>
+                                    <a href="<?php echo esc_url(admin_url('post.php?post=' . $booking_id . '&action=edit')); ?>" class="button button-primary">
+                                        <?php _e('Edit', 'motopress-hotel-booking'); ?>
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php else : ?>
+                        <tr>
+                            <td colspan="12"><?php _e('No ongoing or future bookings found.', 'motopress-hotel-booking'); ?></td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+
+            <div class="tablenav">
+                <div class="tablenav-pages">
+                    <?php
+                    $page_links = paginate_links(array(
+                        'base' => add_query_arg('paged', '%#%'),
+                        'format' => '',
+                        'prev_text' => __('&laquo;', 'motopress-hotel-booking'),
+                        'next_text' => __('&raquo;', 'motopress-hotel-booking'),
+                        'total' => $total_pages,
+                        'current' => $paged
+                    ));
+
+                    if ($page_links) {
+                        echo '<div class="tablenav"><div class="tablenav-pages">' . $page_links . '</div></div>';
+                    }
+                    ?>
+                </div>
             </div>
-        </div>
+
+            <p><input type="submit" name="save_cleaner" class="button button-primary" value="<?php _e('Save Changes', 'motopress-hotel-booking'); ?>"></p>
+        </form>
     </div>
 <?php
     wp_reset_postdata();
 }
 
 
+/*
 function display_properties_page() {
-    // Check user capabilities
     if (!current_user_can('manage_options')) {
         return;
     }
@@ -2231,8 +2257,8 @@ function display_properties_page() {
     $per_page = 20;
     $offset = ($paged - 1) * $per_page;
 
-    // Define date range
     $today = date('Y-m-d');
+    $one_week_ago = date('Y-m-d', strtotime('-1 week', strtotime($today)));
 
     // Fetch properties data with pagination
     $properties_data = $wpdb->get_results($wpdb->prepare("
@@ -2248,9 +2274,9 @@ function display_properties_page() {
         WHERE p.post_type = 'mphb_booking'
         AND (pm_checkin.meta_value >= %s OR pm_checkin.meta_value IS NULL)
         GROUP BY p.ID
-        ORDER BY pm_checkin.meta_value ASC
+        ORDER BY pm_checkin.meta_value DESC
         LIMIT %d OFFSET %d
-    ", $today, $per_page, $offset));
+    ", $one_week_ago, $per_page, $offset));
 
     $total_properties = $wpdb->get_var($wpdb->prepare("
         SELECT COUNT(DISTINCT p.ID)
@@ -2258,7 +2284,7 @@ function display_properties_page() {
         LEFT JOIN {$wpdb->prefix}postmeta pm_checkin ON p.ID = pm_checkin.post_id AND pm_checkin.meta_key = 'mphb_check_in_date'
         WHERE p.post_type = 'mphb_booking'
         AND (pm_checkin.meta_value >= %s OR pm_checkin.meta_value IS NULL)
-    ", $today));
+    ", $one_week_ago));
 
     $total_pages = ceil($total_properties / $per_page);
 
@@ -2268,7 +2294,6 @@ function display_properties_page() {
         'hide_empty' => false,
     ));
 
-    // Pagination
     $page_links = paginate_links(array(
         'base' => add_query_arg('paged', '%#%'),
         'format' => '',
@@ -2341,11 +2366,11 @@ function display_properties_page() {
     echo '</form>';
     echo '</div>';
 }
+*/
 
 
 
 function display_previous_bookings() {
-    // Check user capabilities
     if (!current_user_can('manage_options')) {
         return;
     }
@@ -2356,11 +2381,9 @@ function display_previous_bookings() {
     $per_page = 20;
     $offset = ($paged - 1) * $per_page;
 
-    // Define date range
     $today = date('Y-m-d');
     $one_week_ago = date('Y-m-d', strtotime('-1 week', strtotime($today)));
 
-    // Fetch previous bookings data with pagination
     $previous_bookings = $wpdb->get_results($wpdb->prepare("
         SELECT p.ID, 
         COALESCE(CONCAT(pm_first_name.meta_value, ' ', pm_last_name.meta_value), 'N/A') as full_name, 
@@ -2388,7 +2411,6 @@ function display_previous_bookings() {
 
     $total_pages = ceil($total_previous_bookings / $per_page);
 
-    // Pagination
     $page_links = paginate_links(array(
         'base' => add_query_arg('paged', '%#%'),
         'format' => '',
@@ -2418,7 +2440,6 @@ function display_previous_bookings() {
 
     if ($previous_bookings) {
         foreach ($previous_bookings as $booking) {
-            // Fetch reserved rooms and construct property list
             $booking_obj = MPHB()->getBookingRepository()->findById($booking->ID);
             $reserved_rooms = $booking_obj->getReservedRooms();
             $property_list = [];
